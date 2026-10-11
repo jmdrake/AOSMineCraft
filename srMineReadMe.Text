@@ -1,0 +1,195 @@
+# srMine: a Minecraft-style block world for the A2 voxel raytracer
+
+srMine is a small Minecraft-like game built on Soren Renner's realtime voxel raytracer (the `sr*`
+modules in A2). You walk around a 64×64×64 world of blocks: hills, water, sand and trees. You can
+break blocks and build with nine block types, including glass.
+
+Every pixel is ray traced on the CPU, spread over the ray engine's 108 worker threads. Nothing is
+turned into triangles.
+
+The original fractal demo (`srRender.Open`) still works and is separate from this one.
+
+---
+
+## Files
+
+| File | What it is |
+|---|---|
+| `srMine.Mod` | The world: block types, the 64³ grid, terrain generation, ray marching, breaking and placing |
+| `srMineRender.Mod` | The game: window, keyboard and mouse, player physics, camera, HUD, main loop |
+| `srMineReadMe.md` | This file |
+
+srMine uses only two modules from the original raytracer:
+
+- `srBase`: shared types (`Voxel`, `Ray`, `COLOR`, `PT`) and the ray and image buffers
+- `srRayEngine`: the worker threads that trace the image tile by tile
+
+---
+
+## Building and running
+
+In an A2 text window, middle-click each command:
+
+```
+PC.Compile \s srMine.Mod srMineRender.Mod ~
+SystemTools.Free srMineRender srMine ~
+srMineRender.Open ~
+```
+
+You need the `Free` line whenever you recompile. The world is built when `srMine` is loaded, so a
+freshly loaded module also gives you a fresh world.
+
+On newer A2 builds, `LONGINT` is spelled `SIGNED32`, and the window event handlers take `SIZE`
+arguments. The srMine files already use these. The older `sr*` modules may need the same changes
+before they compile.
+
+Don't run `srRender.Open` (the old demo) and `srMineRender.Open` at the same time. They share
+`srRayEngine` and would draw each other's world.
+
+---
+
+## Controls
+
+| Input | Action |
+|---|---|
+| **W A S D** | walk forward, left, back, right |
+| **Space** | jump (hold to keep jumping). In water: swim up. In fly mode: go up |
+| **C** | fly down (fly mode) |
+| **F** | switch between walking and flying |
+| **Left-drag** | look around |
+| **Right click** or **X** | break the block under the crosshair (within 12 blocks) |
+| **Middle click** or **E** | place the selected block against the face under the crosshair |
+| **Mouse wheel** or **B** | choose the block type to place |
+| **[ / ]** | zoom in / out |
+| **P** | half-resolution tracing (faster, blockier) |
+| **H** | go back to the spawn point |
+| **Q** | quit (or close the window) |
+
+The selected block is shown as a small cube in the top-right corner of the window. Its name is
+also printed in the Kernel Log.
+
+Block types you can place: grass, dirt, stone, planks, brick, wood, leaves, sand, glass.
+Bedrock (the bottom layer) and water can't be broken.
+
+### Why a quick tap moves you about 0.7 seconds
+
+Unix A2's keyboard driver (`Unix.KbdMouse.Mod`) only reports key *releases* for Shift, Ctrl and
+Alt. It never tells a program when W or Space has been let go. srMine works around this: a key
+counts as held for as long as the keyboard's auto-repeat presses keep arriving.
+
+A2 can't tell when you've let go until the repeat delay has passed with no repeat. So after a
+single tap you keep moving for `FIRSTHOLD` milliseconds (700 by default). Holding a key down works
+normally.
+
+To make tapping more responsive, shorten the X auto-repeat delay. Run this in the Linux/WSL shell,
+not in A2:
+
+```
+xset r rate 250 30
+```
+
+Then lower `FIRSTHOLD` near the top of `srMineRender.Mod` to about 300 and recompile.
+
+---
+
+## How it works
+
+### Coordinates
+
+- The renderer works in the **unit cube**, from (0,0,0) to (1,1,1). The world grid divides it
+  into `N` = 64 blocks along each axis, so block `(i, j, k)` covers `[i/N, (i+1)/N)` and so on.
+- **+z is down.** A block at height `h` above the bottom of the world is stored at `z = N-1-h`.
+  The helper procedures `put` and `at` in `srMine` hide this.
+- The player's position and speeds in `srMineRender` are measured in **blocks**. They are divided
+  by `N` when rays are built.
+
+### One frame
+
+The `MainLoop` object in `srMineRender` runs this loop:
+
+1. **`physics(dt)`** reads the keys and applies gravity or flying. It then moves the player in
+   small steps, one axis at a time. The player is a 0.6 × 0.6 × 1.7 block box, so moving one axis
+   at a time lets you slide along walls and land exactly on top of blocks.
+2. **`initrays`** builds one ray per pixel with a **pinhole camera**. Each ray goes from the eye
+   through a point on a flat image plane, using the forward, right and down vectors from `yaw`
+   and `pitch`. This replaced the old demo's spherical camera, which caused the fisheye warping.
+3. Break or place, if it was requested. Both use the ray through the centre of the screen (the
+   crosshair).
+4. **`srRayEngine.lgo`** has the worker threads call `world.Shade(ray)` for every pixel.
+5. **`draw`** copies the traced image into the window at 2× size. It then adds the crosshair, and
+   `hud` draws the selected-block cube.
+
+### Ray marching (`World.Shade` in srMine)
+
+Each ray steps through the grid **one cell at a time**, using the Amanatides & Woo grid traversal.
+For each cell:
+
+- **Empty (`NIL`)**: keep going.
+- **A block**: first blend in fog for the distance travelled since the last hit. Then call the
+  block's own `Shade`, which adds colour to the ray and uses up some or all of its remaining light
+  (`ray.ra / ga / ba`). Once the light is nearly used up, the ray stops.
+- **Leaving the world**: whatever light is left becomes sky colour, bluer looking up and paler
+  toward the horizon.
+
+### Block types
+
+Every cell in the grid holds either `NIL` or a reference to a **shared** block object. All grass
+cells point at the same `GRASS` object, so changing `GRASS` changes every grass block.
+
+| Type | Behaviour |
+|---|---|
+| `Block` | Opaque. Brightness is fixed per face (top 1.0, sides 0.8 / 0.65, bottom 0.5). Each face also gets a dark outline and a faint 8×8 "pixel" texture |
+| `Water` | `passable`. Tints the ray and lets it continue. Can't be picked, so it can't be broken |
+| `Glass` | Solid like stone, so it blocks movement and can be broken. Inside the frame it only tints the ray, like water. The frame around each face is drawn opaque |
+
+Collision uses the voxel's `passable` flag. Breaking and placing look for the first
+non-`passable` block within reach (`pick` in srMine).
+
+---
+
+## Making changes
+
+### Change a colour
+
+Block colours are set at the bottom of `srMine.Mod`. The first colour is the top face and the
+second is the sides and bottom. Components go from 0 to 1.
+
+```oberon
+NEW(GRASS, "grass", rgb(0.36, 0.70, 0.25), rgb(0.55, 0.42, 0.27));
+```
+
+### Change the terrain
+
+- `height(x, y)` returns the ground height of each column. It's a sum of sine waves; change the
+  numbers to get flatter or hillier land.
+- `generate` fills each column with bedrock, then stone, then 3 dirt, then grass (or sand near the
+  water). It then fills with water up to `SEALEVEL` and scatters 30 trees.
+- `N` sets the world size. Raising it makes the world bigger but slower to trace.
+
+### Add a new block type
+
+1. Declare it with the other blocks: `GOLD: Block;`
+2. Create it in the module body: `NEW(GOLD, "gold", rgb(0.9, 0.8, 0.2), rgb(0.85, 0.7, 0.15));`
+3. To make it placeable, add it to `palette` and increase `NPAL`.
+4. For a block that looks or behaves differently, make a subtype such as `Glass* = OBJECT(Block)`
+   and override `Shade`.
+
+### Tune the player
+
+The constants at the top of `srMineRender.Mod` control walking speed, flying speed, gravity, jump
+height, the size of the player's box, mouse sensitivity (`LOOKSPEED`) and window scale (`SCALE`).
+
+---
+
+## Known limitations and ideas
+
+- **Key release delay**: see *Why a quick tap moves you about 0.7 seconds* above. The proper fix is
+  to make `Unix.KbdMouse.Mod` report every key release.
+- **No real lighting.** Faces have fixed brightness and there are no shadows. Shadows could be
+  added by tracing a second ray from each hit point toward a sun direction.
+- **The world is not saved.** It's regenerated every time `srMine` loads. Saving would mean writing
+  the 64³ grid (one byte per cell, as an index into a block list) to a file.
+- **Water doesn't flow** and nothing grows. A `tick` procedure registered with `srBase` could
+  update blocks every frame.
+- Other ideas: block textures from images (see `srTexVox`), an inventory, a larger world built
+  from chunks, mobs.

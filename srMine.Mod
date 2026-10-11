@@ -92,6 +92,35 @@ TYPE
 
 	END Water;
 
+	(* Solid like stone (you can't walk through it, you can break it) but see-through.
+		The edges of each face are drawn as an opaque frame so you can tell where the glass is. *)
+	Glass* = OBJECT(Block)
+
+	PROCEDURE Shade(VAR ray: Ray);
+	CONST FRAME = 0.07; K = 0.12;	(* frame width; how much each pane tints the light *)
+	VAR u, v: SREAL;
+	BEGIN
+		CASE ray.face OF
+			1, 4: u := ray.lxyz.y; v := ray.lxyz.z
+			| 2, 5: u := ray.lxyz.x; v := ray.lxyz.z
+		ELSE
+			u := ray.lxyz.x; v := ray.lxyz.y
+		END;
+		IF (u < FRAME) OR (u > 1 - FRAME) OR (v < FRAME) OR (v > 1 - FRAME) THEN
+			Shade^(ray)	(* the frame is drawn like any other block *)
+		ELSE
+			ray.r := ray.r + top.red * K * ray.ra;
+			ray.g := ray.g + top.green * K * ray.ga;
+			ray.b := ray.b + top.blue * K * ray.ba;
+			ray.ra := ray.ra * (1 - K);
+			ray.ga := ray.ga * (1 - K);
+			ray.ba := ray.ba * (1 - K);
+			ray.a := (ray.ra + ray.ga + ray.ba) / 3
+		END
+	END Shade;
+
+	END Glass;
+
 	(* The whole world. srRender calls Shade once per pixel, from many threads at once. *)
 	World* = OBJECT(Voxel)
 	VAR
@@ -212,8 +241,10 @@ TYPE
 	BEGIN
 		pick(ray, hi, hj, hk, pi, pj, pk, found);
 		ci := cell(ray.lxyz.x * N); cj := cell(ray.lxyz.y * N); ck := cell(ray.lxyz.z * N);
+		placed := FALSE;
 		IF found & ~((pi = ci) & (pj = cj) & (pk = ck)) THEN	(* never build inside the camera *)
-			set(pi, pj, pk, palette[selected])
+			set(pi, pj, pk, palette[selected]);
+			placed := TRUE; placedi := pi; placedj := pj; placedk := pk
 		END
 	END mutateray;
 
@@ -246,9 +277,12 @@ VAR
 	world*: World;
 	GRASS, DIRT, STONE, SAND, WOOD, LEAVES, PLANKS, BRICK, BEDROCK: Block;
 	WATER: Water;
+	GLASS: Glass;
 	palette: ARRAY NPAL OF Block;
 	selected: SIGNED32;
 	spawnx*, spawny*, spawnz*: SREAL;	(* srRender.hopcamera puts the camera here *)
+	placed*: BOOLEAN;	(* did the last mutateray place a block, and where *)
+	placedi*, placedj*, placedk*: SIGNED32;
 
 PROCEDURE hash(a, b, c: SIGNED32): SIGNED32;
 VAR h: SIGNED32;
@@ -377,6 +411,18 @@ BEGIN
 	Out.String("srMine: placing "); Out.String(palette[selected].name); Out.Ln
 END nextblock;
 
+PROCEDURE prevblock*;
+BEGIN
+	selected := (selected + NPAL - 1) MOD NPAL;
+	Out.String("srMine: placing "); Out.String(palette[selected].name); Out.Ln
+END prevblock;
+
+(* the block that 'e' / middle click will place; the renderer draws it in the corner *)
+PROCEDURE current*(): Block;
+BEGIN
+	RETURN palette[selected]
+END current;
+
 (* srRender's camera-trail hooks; not used in this world *)
 PROCEDURE cameratrail*(v: Voxel; a, b: PT);
 END cameratrail;
@@ -396,9 +442,10 @@ BEGIN
 	NEW(BEDROCK, "bedrock", rgb(0.20, 0.20, 0.20), rgb(0.20, 0.20, 0.20));
 	NEW(WATER, "water", rgb(0.15, 0.35, 0.75), rgb(0.15, 0.35, 0.75));
 	WATER.passable := TRUE;
+	NEW(GLASS, "glass", rgb(0.80, 0.92, 0.95), rgb(0.80, 0.92, 0.95));
 	palette[0] := GRASS; palette[1] := DIRT; palette[2] := STONE;
 	palette[3] := PLANKS; palette[4] := BRICK; palette[5] := WOOD;
-	palette[6] := LEAVES; palette[7] := SAND; palette[8] := WATER;
+	palette[6] := LEAVES; palette[7] := SAND; palette[8] := GLASS;
 	selected := 3;
 	NEW(world);
 	generate;
