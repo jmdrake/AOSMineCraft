@@ -761,9 +761,9 @@ BEGIN
 	tracetiled:=TRUE;
 END srMineRender.
 
-srRender.Open ~
+srMineRender.Open ~
 
-SystemTools.Free srRender srvoxels ~
+SystemTools.Free srMineRender srvoxels ~
 
 SystemTools.Free
 srBase
