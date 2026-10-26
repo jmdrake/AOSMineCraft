@@ -1,0 +1,32 @@
+version: '3'
+
+vars:
+  PYTHON: '{{.PYTHON | default (ternary "python" "python3" (eq OS "windows"))}}'
+  OB: '{{.OB | default "ob"}}'
+  PLATFORM: '{{if eq OS "windows"}}windows{{else}}linux{{end}}'
+
+tasks:
+  default:
+    cmds:
+      - task: build
+
+  build:
+    desc: Build the executable for this machine (Windows or Linux x86-64)
+    cmds:
+      - task: 'build:{{.PLATFORM}}'
+
+  build:windows:
+    desc: Build build/windows/AOSMineCraft.exe on Windows x86-64
+    cmds:
+      - '"{{.PYTHON}}" scripts/build.py windows --ob "{{.OB}}"'
+
+  build:linux:
+    desc: Build build/linux/AOSMineCraft on Linux x86-64
+    cmds:
+      - '"{{.PYTHON}}" scripts/build.py linux --ob "{{.OB}}"'
+
+  run:
+    desc: Build and run the game on this machine
+    cmds:
+      - task: build
+      - '"./build/{{.PLATFORM}}/AOSMineCraft{{exeExt}}"'
