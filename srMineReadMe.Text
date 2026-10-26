@@ -31,13 +31,15 @@ srMine uses only two modules from the original raytracer:
 In an A2 text window, middle-click each command:
 
 ```
-PC.Compile \s srMine.Mod srMineRender.Mod ~
-SystemTools.Free srMineRender srMine ~
+PC.Compile \s srMineWindow.Mod srMine.Mod srMineRender.Mod ~
+SystemTools.Free srMineRender srMine srMineWindow ~
 srMineRender.Open ~
 ```
 
 You need the `Free` line whenever you recompile. The world is built when `srMine` is loaded, so a
 freshly loaded module also gives you a fresh world.
+
+For standalone Windows and Linux executables built with Task, see README.md.
 
 On newer A2 builds, `LONGINT` is spelled `SIGNED32`, and the window event handlers take `SIZE`
 arguments. The srMine files already use these. The older `sr*` modules may need the same changes
