@@ -1,6 +1,6 @@
 MODULE srMineRender;	(* first-person walking camera for the srMine block world *)
-IMPORT Modules, Kernel, Inputs, WMWindowManager, Raster, Objects,
-	Rectangles := WMRectangles, Out := KernelLog, Math, srBase, srMine, srRayEngine;
+IMPORT Modules, Kernel, Inputs, WindowSystem := srMineWindow, Raster, Objects,
+	Out := KernelLog, Math, srBase, srMine, srRayEngine;
 
 (*
 	Controls
@@ -47,16 +47,14 @@ TYPE
 	SREAL = srBase.SREAL;
 	PT = srBase.PT;
 
-	Window = OBJECT(WMWindowManager.DoubleBufferWindow)
+	Window = OBJECT(WindowSystem.Window)
 	VAR
 		lastx, lasty: SIZE;
 		closed: BOOLEAN;
 
 	PROCEDURE & New*;
 	BEGIN
-		Init(W * SCALE, H * SCALE, FALSE);
-		manager := WMWindowManager.GetDefaultManager();
-		manager.Add(100, 100, SELF, {WMWindowManager.FlagFrame, WMWindowManager.FlagClose});
+		Open(W * SCALE, H * SCALE);
 	END New;
 
 	PROCEDURE KeyEvent* (ucs : SIZE; flags : SET; keysym : SIZE);
@@ -351,8 +349,7 @@ BEGIN
 	Raster.Fill(w.backImg, CX * SCALE - 8, CY * SCALE - 1, CX * SCALE + 8, CY * SCALE + 1, pixel, mode);
 	Raster.Fill(w.backImg, CX * SCALE - 1, CY * SCALE - 8, CX * SCALE + 1, CY * SCALE + 8, pixel, mode);
 	hud(w);
-	w.Swap;
-	w.Invalidate(Rectangles.MakeRect(0, 0, w.GetWidth(), w.GetHeight()))
+	w.Present
 END draw;
 
 (* Draw the selected block as a small isometric cube in the top-right corner.
@@ -420,6 +417,6 @@ BEGIN
 	Modules.InstallTermHandler(Close)
 END srMineRender.
 
-PC.Compile \s srMine.Mod srMineRender.Mod ~
-SystemTools.Free srMineRender srMine ~
+PC.Compile \s srMineWindow.Mod srMine.Mod srMineRender.Mod ~
+SystemTools.Free srMineRender srMine srMineWindow ~
 srMineRender.Open ~
